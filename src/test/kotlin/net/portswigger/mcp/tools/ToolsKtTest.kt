@@ -12,6 +12,9 @@ import burp.api.montoya.http.message.HttpHeader
 import burp.api.montoya.http.message.requests.HttpRequest
 import burp.api.montoya.logging.Logging
 import burp.api.montoya.persistence.PersistedObject
+import burp.api.montoya.core.Annotations
+import burp.api.montoya.http.message.MimeType
+import burp.api.montoya.http.message.responses.HttpResponse
 import burp.api.montoya.proxy.Proxy
 import burp.api.montoya.proxy.ProxyHttpRequestResponse
 import burp.api.montoya.utilities.Base64Utils
@@ -796,7 +799,7 @@ class ToolsKtTest {
                 )
                 
                 delay(100)
-                assertEquals("Reached end of items", result3.expectTextContent())
+                assertEquals("Reached end of items. Total: 3", result3.expectTextContent())
             }
         }
     }
@@ -1071,6 +1074,310 @@ class ToolsKtTest {
             assertTrue(tools.any { it.name == "get_scanner_issues" })
             assertTrue(tools.any { it.name == "generate_collaborator_payload" })
             assertTrue(tools.any { it.name == "get_collaborator_interactions" })
+        }
+    }
+
+    @Nested
+    inner class HistoryToolsTests {
+
+        private fun mockEntry(
+            id: Int,
+            method: String = "GET",
+            host: String = "example.com",
+            path: String = "/",
+            status: Int = 200,
+            mime: String = "JSON",
+            reqBytes: Int = 100,
+            resBytes: Int = 200,
+            notes: String = "",
+            reqString: String = "GET / HTTP/1.1\r\nHost: example.com\r\nCookie: a=b\r\n\r\nREQBODY",
+            resString: String = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\nRESPONSEBODY",
+        ): ProxyHttpRequestResponse {
+            val svc = mockk<burp.api.montoya.http.HttpService>(relaxed = true)
+            every { svc.host() } returns host
+            every { svc.port() } returns 443
+            every { svc.secure() } returns true
+
+            val reqBa = mockk<ByteArray>(relaxed = true)
+            every { reqBa.length() } returns reqBytes
+            val req = mockk<HttpRequest>(relaxed = true)
+            every { req.method() } returns method
+            every { req.path() } returns path
+            every { req.hasParameters() } returns false
+            every { req.httpService() } returns svc
+            every { req.toByteArray() } returns reqBa
+            every { req.toString() } returns reqString
+
+            val resBa = mockk<ByteArray>(relaxed = true)
+            every { resBa.length() } returns resBytes
+            val res = mockk<HttpResponse>(relaxed = true)
+            every { res.statusCode() } returns status.toShort()
+            every { res.reasonPhrase() } returns "OK"
+            every { res.toByteArray() } returns resBa
+            every { res.toString() } returns resString
+
+            val ann = mockk<Annotations>(relaxed = true)
+            every { ann.notes() } returns notes
+
+            val entry = mockk<ProxyHttpRequestResponse>(relaxed = true)
+            every { entry.id() } returns id
+            every { entry.request() } returns req
+            every { entry.response() } returns res
+            every { entry.httpService() } returns svc
+            every { entry.mimeType() } returns MimeType.valueOf(mime)
+            every { entry.time() } returns ZonedDateTime.parse("2024-01-01T00:00:00Z")
+            every { entry.annotations() } returns ann
+            return entry
+        }
+
+        private fun stubHistory(entries: List<ProxyHttpRequestResponse>) {
+            val proxy = mockk<Proxy>(relaxed = true)
+            every { api.proxy() } returns proxy
+            every { proxy.history() } returns entries
+        }
+
+        @Test
+        fun `summary returns flat newest-first table with ids and end sentinel`() {
+            stubHistory(listOf(mockEntry(1, path = "/a"), mockEntry(2, path = "/b"), mockEntry(3, path = "/c")))
+            runBlocking {
+                val result = client.callTool("get_proxy_http_history_summary", emptyMap())
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("\"total\":3"), text)
+                assertTrue(text.contains("# id | method | host"), text)
+                assertTrue(text.indexOf("\n3 |") in 0 until text.indexOf("\n1 |"), "newest-first ordering: $text")
+                assertTrue(text.contains("END OF HISTORY"), text)
+            }
+        }
+
+        @Test
+        fun `summary clamps an over-shooting toId`() {
+            stubHistory((1..5).map { mockEntry(it) })
+            runBlocking {
+                val result = client.callTool("get_proxy_http_history_summary", mapOf("toId" to 100))
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("\"clampedToId\":5"), text)
+                assertTrue(text.contains("\"matched\":5"), text)
+            }
+        }
+
+        @Test
+        fun `summary reports a clear message past the end`() {
+            stubHistory((1..5).map { mockEntry(it) })
+            runBlocking {
+                val result = client.callTool("get_proxy_http_history_summary", mapOf("fromId" to 100))
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("No requests with id >= 100"), text)
+                assertTrue(text.contains("Highest id in history is 5"), text)
+            }
+        }
+
+        @Test
+        fun `summary host filter narrows results`() {
+            stubHistory(
+                listOf(mockEntry(1, host = "a.com"), mockEntry(2, host = "b.com"), mockEntry(3, host = "a.com"))
+            )
+            runBlocking {
+                val result = client.callTool(
+                    "get_proxy_http_history_summary",
+                    mapOf("hosts" to Json.encodeToJsonElement(listOf("a.com")))
+                )
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("\"matched\":2"), text)
+                assertFalse(text.contains("b.com"), text)
+            }
+        }
+
+        @Test
+        fun `entry by id returns full detail and out-of-range is explained`() {
+            stubHistory(listOf(mockEntry(1), mockEntry(2)))
+            runBlocking {
+                val ok = client.callTool("get_proxy_http_entry", mapOf("id" to 2))
+                delay(100)
+                val okText = ok.expectTextContent()
+                assertTrue(okText.contains("RESPONSEBODY"), okText)
+                assertTrue(okText.contains("\"id\":2"), okText)
+
+                val bad = client.callTool("get_proxy_http_entry", mapOf("id" to 99))
+                delay(100)
+                val badText = bad.expectTextContent()
+                assertTrue(badText.contains("No proxy history entry with id=99"), badText)
+                assertTrue(badText.contains("1..2"), badText)
+            }
+        }
+
+        @Test
+        fun `entry response_headers omits body but keeps headers`() {
+            stubHistory(listOf(mockEntry(1)))
+            runBlocking {
+                val result = client.callTool(
+                    "get_proxy_http_entry",
+                    mapOf("id" to 1, "include" to "response_headers")
+                )
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("Content-Type: application/json"), text)
+                assertFalse(text.contains("RESPONSEBODY"), text)
+                assertTrue(text.contains("body omitted"), text)
+            }
+        }
+
+        @Test
+        fun `entry body cap truncates body but never headers`() {
+            val big = "X".repeat(5000)
+            stubHistory(
+                listOf(mockEntry(1, resString = "HTTP/1.1 200 OK\r\nSet-Cookie: secret=keepme\r\n\r\n$big"))
+            )
+            runBlocking {
+                val result = client.callTool("get_proxy_http_entry", mapOf("id" to 1, "maxBodyBytes" to 50))
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("Set-Cookie: secret=keepme"), text)
+                assertTrue(text.contains("\"truncatedBody\":true"), text)
+            }
+        }
+
+        @Test
+        fun `entry context shows neighbouring rows`() {
+            stubHistory((1..5).map { mockEntry(it, path = "/p$it") })
+            runBlocking {
+                val result = client.callTool(
+                    "get_proxy_http_entry",
+                    mapOf("id" to 3, "contextBefore" to 2, "contextAfter" to 1)
+                )
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("Context BEFORE"), text)
+                assertTrue(text.contains("Context AFTER"), text)
+                assertTrue(text.contains("/p2"), text)
+                assertTrue(text.contains("/p4"), text)
+            }
+        }
+
+        @Test
+        fun `search returns rows with snippet not full body`() {
+            stubHistory(
+                listOf(
+                    mockEntry(1, resString = "HTTP/1.1 200 OK\r\n\r\nnothing here"),
+                    mockEntry(2, resString = "HTTP/1.1 200 OK\r\nAuthorization: Bearer TOKEN123\r\n\r\nbody")
+                )
+            )
+            runBlocking {
+                val result = client.callTool("search_proxy_http_history", mapOf("term" to "Bearer TOKEN123"))
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("\"matches\":1"), text)
+                assertTrue(text.contains("Bearer TOKEN123"), text)
+                assertTrue(text.contains("2 |"), text)
+            }
+        }
+
+        @Test
+        fun `stats returns aggregates only`() {
+            stubHistory(
+                listOf(
+                    mockEntry(1, method = "GET", host = "a.com", status = 200),
+                    mockEntry(2, method = "POST", host = "a.com", status = 404),
+                    mockEntry(3, method = "GET", host = "b.com", status = 200)
+                )
+            )
+            runBlocking {
+                val result = client.callTool("get_proxy_http_history_stats", emptyMap())
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("\"total\":3"), text)
+                assertTrue(text.contains("\"idRange\":\"1..3\""), text)
+                assertTrue(text.contains("\"2xx\":2"), text)
+                assertTrue(text.contains("\"4xx\":1"), text)
+            }
+        }
+
+        @Test
+        fun `get tls passthrough returns the ssl_pass_through section`() {
+            val burpSuite = mockk<burp.api.montoya.burpsuite.BurpSuite>(relaxed = true)
+            every { api.burpSuite() } returns burpSuite
+            every { burpSuite.exportProjectOptionsAsJson("proxy.ssl_pass_through") } returns
+                """{"proxy":{"ssl_pass_through":{"apply_to_out_of_scope_items":true,""" +
+                """"automatically_add_entries_on_client_ssl_negotiation_failure":false,"rules":[]}}}"""
+            runBlocking {
+                val result = client.callTool("get_proxy_tls_passthrough", emptyMap())
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("apply_to_out_of_scope_items"), text)
+                assertTrue(text.contains("rules"), text)
+            }
+        }
+
+        @Test
+        fun `set tls passthrough adds a host rule and imports merged json`() {
+            val burpSuite = mockk<burp.api.montoya.burpsuite.BurpSuite>(relaxed = true)
+            every { api.burpSuite() } returns burpSuite
+            every { burpSuite.exportProjectOptionsAsJson("proxy.ssl_pass_through") } returnsMany listOf(
+                """{"proxy":{"ssl_pass_through":{"apply_to_out_of_scope_items":true,""" +
+                    """"automatically_add_entries_on_client_ssl_negotiation_failure":false,"rules":[]}}}""",
+                """{"proxy":{"ssl_pass_through":{"apply_to_out_of_scope_items":true,""" +
+                    """"automatically_add_entries_on_client_ssl_negotiation_failure":false,"rules":[""" +
+                    """{"enabled":true,"host":"\\.example\\.com","port":"443","protocol":"any"}]}}}"""
+            )
+            val importSlot = slot<String>()
+            every { burpSuite.importProjectOptionsFromJson(capture(importSlot)) } just runs
+
+            runBlocking {
+                val result = client.callTool(
+                    "set_proxy_tls_passthrough",
+                    mapOf("addHosts" to Json.encodeToJsonElement(listOf("""\.example\.com""")))
+                )
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("example"), text)
+            }
+
+            val imported = importSlot.captured
+            assertTrue(imported.contains("ssl_pass_through"), imported)
+            assertTrue(imported.contains("example"), imported)
+            assertTrue(imported.contains("\"enabled\":true"), imported)
+            assertTrue(imported.contains("\"port\":\"443\""), imported)
+            assertTrue(imported.contains("\"protocol\":\"any\""), imported)
+        }
+
+        @Test
+        fun `set tls passthrough toggles flag without touching rules`() {
+            val burpSuite = mockk<burp.api.montoya.burpsuite.BurpSuite>(relaxed = true)
+            every { api.burpSuite() } returns burpSuite
+            every { burpSuite.exportProjectOptionsAsJson("proxy.ssl_pass_through") } returns
+                """{"proxy":{"ssl_pass_through":{"apply_to_out_of_scope_items":true,""" +
+                """"automatically_add_entries_on_client_ssl_negotiation_failure":false,""" +
+                """"rules":[{"enabled":true,"host":"keep\\.me"}]}}}"""
+            val importSlot = slot<String>()
+            every { burpSuite.importProjectOptionsFromJson(capture(importSlot)) } just runs
+
+            runBlocking {
+                val result = client.callTool(
+                    "set_proxy_tls_passthrough",
+                    mapOf("autoAddOnNegotiationFailure" to true)
+                )
+                delay(100)
+                result.expectTextContent()
+            }
+
+            val imported = importSlot.captured
+            assertTrue(imported.contains("\"automatically_add_entries_on_client_ssl_negotiation_failure\":true"), imported)
+            assertTrue(imported.contains("keep"), imported)
+        }
+
+        @Test
+        fun `joinWithBudget truncates at item boundaries and always includes one`() {
+            val items = listOf("a".repeat(40), "b".repeat(40), "c".repeat(40))
+            val (text, truncated, count) = joinWithBudget(items, budget = 90, sep = "\n")
+            assertTrue(truncated)
+            assertEquals(2, count)
+            assertFalse(text.contains("c"))
+
+            val (_, _, single) = joinWithBudget(listOf("x".repeat(100)), budget = 10)
+            assertEquals(1, single)
         }
     }
 }

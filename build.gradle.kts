@@ -97,6 +97,7 @@ tasks {
 
     shadowJar {
         archiveClassifier.set("")
+        archiveFileName.set("burpmcp-plus.jar")
         mergeServiceFiles()
 
         manifest {

@@ -1,143 +1,95 @@
-# Burp Suite MCP Server Extension
+# BurpMCP+
 
-## Overview
+**An LLM-friendly Burp Suite MCP server.** A fork of PortSwigger's official
+[mcp-server](https://github.com/PortSwigger/mcp-server) that makes Burp's proxy history
+actually usable by AI clients: a flat, scannable request table instead of a multi-megabyte
+raw dump, on-demand full entries (with cookies/headers never truncated), content search,
+WebSocket summaries, and one-call **TLS pass-through** management to silence tracker noise.
 
-Integrate Burp Suite with AI Clients using the Model Context Protocol (MCP).
+Built for real engagements where the proxy history is 3,000–4,000+ requests and most of it is
+analytics garbage.
 
-For more information about the protocol visit: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
-
-## Features
-
-- Connect Burp Suite to AI clients through MCP
-- Automatic installation for Claude Desktop
-- Comes with packaged Stdio MCP proxy server
-
-## Usage
-
-- Install the extension in Burp Suite
-- Configure your Burp MCP server in the extension settings
-- Configure your MCP client to use the Burp SSE MCP server or stdio proxy
-- Interact with Burp through your client!
+---
 
 ## Installation
 
-### Prerequisites
+### Option 1 — Download the release (recommended)
 
-Ensure that the following prerequisites are met before building and installing the extension:
+1. Download **[`burpmcp-plus.jar`](https://github.com/RamKansal/BurpMCP/releases/latest/download/burpmcp-plus.jar)**
+   from the [latest release](https://github.com/RamKansal/BurpMCP/releases).
+2. In Burp: **Extensions** → **Add**
+   - **Extension type:** `Java`
+   - **Select file…** → choose `burpmcp-plus.jar`
+   - **Next** → wait for it to load → **Close**
+3. Open the **MCP** tab in Burp, tick **Enabled**, and note the server address
+   (default `http://127.0.0.1:9876`).
 
-1. **Java**: Java must be installed and available in your system's PATH. You can verify this by running `java --version` in your terminal.
-2. **jar Command**: The `jar` command must be executable and available in your system's PATH. You can verify this by running `jar --version` in your terminal. This is required for building and installing the extension.
+> Upgrading from the stock extension or an older build? Untick/Remove the old MCP extension
+> first so they don't both bind the port, then reconnect your MCP client.
 
-### Building the Extension
+### Option 2 — Build from source
 
-1. **Clone the Repository**: Obtain the source code for the MCP Server Extension.
-   ```
-   git clone https://github.com/PortSwigger/mcp-server.git
-   ```
+**Prerequisites:** Java 21 on your `PATH`, and the `jar` command available.
 
-2. **Navigate to the Project Directory**: Move into the project's root directory.
-   ```
-   cd mcp-server
-   ```
+```bash
+./gradlew embedProxyJar
+```
 
-3. **Build the JAR File**: Use Gradle to build the extension.
-   ```
-   ./gradlew embedProxyJar
-   ```
+Output: **`build/libs/burpmcp-plus.jar`**. Load it into Burp exactly as in Option 1.
 
-   This command compiles the source code and packages it into a JAR file located in `build/libs/burp-mcp-all.jar`.
+---
 
-### Loading the Extension into Burp Suite
+## Connect your AI client
 
-1. **Open Burp Suite**: Launch your Burp Suite application.
-2. **Access the Extensions Tab**: Navigate to the `Extensions` tab.
-3. **Add the Extension**:
-    - Click on `Add`.
-    - Set `Extension Type` to `Java`.
-    - Click `Select file ...` and choose the JAR file built in the previous step.
-    - Click `Next` to load the extension.
+BurpMCP+ exposes an **SSE MCP server** at the address shown in the MCP tab
+(default `http://127.0.0.1:9876`). Point your client at it:
 
-Upon successful loading, the MCP Server Extension will be active within Burp Suite.
-
-## Configuration
-
-### Configuring the Extension
-Configuration for the extension is done through the Burp Suite UI in the `MCP` tab.
-- **Toggle the MCP Server**: The `Enabled` checkbox controls whether the MCP server is active.
-- **Enable config editing**: The `Enable tools that can edit your config` checkbox allows the MCP server to expose tools which can edit Burp configuration files.
-- **Advanced options**: You can configure the port and host for the MCP server. By default, it listens on `http://127.0.0.1:9876`.
-
-### Claude Desktop Client
-
-To fully utilize the MCP Server Extension with Claude, you need to configure your Claude client settings appropriately.
-The extension has an installer which will automatically configure the client settings for you.
-
-1. Currently, Claude Desktop only support STDIO MCP Servers
-   for the service it needs.
-   This approach isn't ideal for desktop apps like Burp, so instead, Claude will start a proxy server that points to the
-   Burp instance,  
-   which hosts a web server at a known port (`localhost:9876`).
-
-2. **Configure Claude to use the Burp MCP server**  
-   You can do this in one of two ways:
-
-    - **Option 1: Run the installer from the extension**
-      This will add the Burp MCP server to the Claude Desktop config.
-
-    - **Option 2: Manually edit the config file**  
-      Open the file located at `~/Library/Application Support/Claude/claude_desktop_config.json`,
-      and replace or update it with the following:
-      ```json
-      {
-        "mcpServers": {
-          "burp": {
-            "command": "<path to Java executable packaged with Burp>",
-            "args": [
-                "-jar",
-                "/path/to/mcp/proxy/jar/mcp-proxy-all.jar",
-                "--sse-url",
-                "<your Burp MCP server URL configured in the extension>"
-            ]
-          }
-        }
-      }
-      ```
-
-3. **Restart Claude Desktop** - assuming Burp is running with the extension loaded.
-
-## Manual installations
-If you want to install the MCP server manually you can either use the extension's SSE server directly or the packaged
-Stdio proxy server.
-
-### SSE MCP Server
-In order to use the SSE server directly you can just provide the url for the server in your client's configuration. Depending
-on your client and your configuration in the extension this may be with or without the `/sse` path.
 ```
 http://127.0.0.1:9876
 ```
-or
+or, depending on the client, with the SSE path:
 ```
 http://127.0.0.1:9876/sse
 ```
 
-### Stdio MCP Proxy Server
-The source code for the proxy server can be found here: [MCP Proxy Server](https://github.com/PortSwigger/mcp-proxy)
+For clients that only speak stdio (e.g. Claude Desktop), the extension's installer can wire up
+the bundled stdio proxy automatically — see the **MCP** tab in Burp. The first time a tool reads
+history, Burp shows a data-access approval prompt; click **Allow**.
 
-In order to support MCP Clients which only support Stdio MCP Servers, the extension comes packaged with a proxy server for
-passing requests to the SSE MCP server extension.
+---
 
-If you want to use the Stdio proxy server you can use the extension's installer option to extract the proxy server jar.
-Once you have the jar you can add the following command and args to your client configuration:
+## What BurpMCP+ adds
+
+The original extension returned the *entire* proxy history as raw request/response strings and
+truncated each entry at 5,000 chars — corrupting cookies and blowing past most clients' ~1 MB
+limit. BurpMCP+ replaces that with a triage-first toolset.
+
+| Tool | What it does |
+|---|---|
+| **`get_proxy_http_history_summary`** | **Primary view.** A flat, newest-first table — one compact row per request (`id \| method \| host \| path \| status \| len \| mime`), like Burp's HTTP history pane. Range-chunked (`fromId`/`toId`), filterable (`hosts`, `methods`, `statusCodes`, `hideNoise`, `dedupe`, …), and hard-capped so output never exceeds the size limit. |
+| **`get_proxy_http_entry`** | Full request + response for one entry by its Burp `id`. **Headers/cookies are never truncated;** large bodies cap at `maxBodyBytes` and resume via `bodyOffset`. `contextBefore`/`contextAfter` show the surrounding request sequence. |
+| **`search_proxy_http_history`** | Regex/term search across raw requests+responses → matching rows **+ a snippet** around each hit. Never dumps full bodies. |
+| **`get_proxy_http_history_stats`** | Aggregate shape-check: counts per host / method / status-class / mime-class + id range. ~1–3 KB for any history size. |
+| **`get_proxy_websocket_history_summary`** | Lightweight WebSocket message summaries (direction, size, preview) instead of full payloads. |
+| **`get_proxy_tls_passthrough`** | Read Burp's TLS pass-through configuration (rules + flags). |
+| **`set_proxy_tls_passthrough`** | Add/remove TLS pass-through host rules and toggle flags — exclude noisy trackers from interception at the source. Reads back from Burp to confirm what was actually stored. |
+
+### The workflow
+
 ```
-/path/to/packaged/burp/java -jar /path/to/proxy/jar/mcp-proxy-all.jar --sse-url http://127.0.0.1:9876
+stats()                          → see the shape; spot the noisy hosts
+summary(hideNoise, dedupe)       → flat table of what matters; pick an id
+entry(id, contextAfter=5)        → full request/response + what fired after it
+search(regex="Authorization")    → locate where a token/header lives
+set_proxy_tls_passthrough(...)   → silence the trackers so history stays clean
 ```
 
-### Creating / modifying tools
+Everything from the original extension (HTTP/1.1 & HTTP/2 sending, Repeater/Intruder, scanner
+issues, Collaborator, encoders, config import/export, …) is unchanged and still available.
 
-Tools are defined in `src/main/kotlin/net/portswigger/mcp/tools/Tools.kt`. To define new tools, create a new serializable
-data class with the required parameters which will come from the LLM.
+---
 
-The tool name is auto-derived from its parameters data class. A description is also needed for the LLM. You can return
-a string (or richer PromptMessageContents) to provide data back to the LLM.
+## Credits
 
-Extend the Paginated interface to add auto-pagination support.
+Forked from PortSwigger's [Burp Suite MCP Server](https://github.com/PortSwigger/mcp-server)
+(Daniel S & Daniel Allen, PortSwigger). Licensed under the same terms — see [LICENSE](LICENSE).
