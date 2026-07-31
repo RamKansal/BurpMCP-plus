@@ -204,9 +204,6 @@ class ConfigUi(private val config: McpConfig, private val providers: List<Provid
         rightPanelContent.add(serverConfigurationPanel)
         rightPanelContent.add(createVerticalStrut(Design.Spacing.LG))
 
-        rightPanelContent.add(autoApproveTargetsPanel)
-
-        rightPanelContent.add(createVerticalStrut(Design.Spacing.LG))
         rightPanelContent.add(bindHostsPanel)
 
         rightPanelContent.add(createVerticalStrut(15))
@@ -216,6 +213,9 @@ class ConfigUi(private val config: McpConfig, private val providers: List<Provid
         rightPanelContent.add(createVerticalStrut(10))
 
         rightPanelContent.add(installationPanel)
+
+        rightPanelContent.add(createVerticalStrut(Design.Spacing.LG))
+        rightPanelContent.add(autoApproveTargetsPanel)
 
         val columnsPanel = ResponsiveColumnsPanel(leftPanel, rightPanel)
         panel.add(columnsPanel, BorderLayout.CENTER)

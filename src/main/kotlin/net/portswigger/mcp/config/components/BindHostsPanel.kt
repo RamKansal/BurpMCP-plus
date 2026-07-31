@@ -97,7 +97,7 @@ class BindHostsPanel(private val config: McpConfig) : JPanel() {
                 selectionMode = ListSelectionModel.SINGLE_SELECTION
                 visibleRowCount = 4
                 font = Design.Typography.bodyMedium
-                background = Design.Colors.listBackground
+                background = Design.Colors.surface
                 foreground = Design.Colors.onSurface
                 border = BorderFactory.createEmptyBorder(Design.Spacing.SM, Design.Spacing.MD, Design.Spacing.SM, Design.Spacing.MD)
                 cellRenderer = buildCellRenderer()
@@ -148,7 +148,17 @@ class BindHostsPanel(private val config: McpConfig) : JPanel() {
                     when {
                         isSelected  -> { background = Design.Colors.listSelectionBackground; foreground = Design.Colors.listSelectionForeground }
                         isRollover  -> { background = Design.Colors.listHoverBackground;     foreground = Design.Colors.onSurface }
-                        else        -> { background = if (index % 2 == 0) Design.Colors.listBackground else Design.Colors.listAlternatingBackground; foreground = Design.Colors.onSurface }
+                        else        -> {
+                            // Use surface colour for all rows to avoid white flash in dark themes.
+                            // Odd rows get a subtle tint via outlineVariant blended with surface.
+                            background = if (index % 2 == 0) Design.Colors.surface
+                                         else java.awt.Color(
+                                             (Design.Colors.surface.red   * 0.92f + Design.Colors.outlineVariant.red   * 0.08f).toInt(),
+                                             (Design.Colors.surface.green * 0.92f + Design.Colors.outlineVariant.green * 0.08f).toInt(),
+                                             (Design.Colors.surface.blue  * 0.92f + Design.Colors.outlineVariant.blue  * 0.08f).toInt()
+                                         )
+                            foreground = Design.Colors.onSurface
+                        }
                     }
                     return this
                 }
@@ -168,8 +178,8 @@ class BindHostsPanel(private val config: McpConfig) : JPanel() {
                 BorderFactory.createLineBorder(Design.Colors.listBorder, 1),
                 BorderFactory.createEmptyBorder(1, 1, 1, 1)
             )
-            background = Design.Colors.listBackground
-            viewport.background = Design.Colors.listBackground
+            background = Design.Colors.surface
+            viewport.background = Design.Colors.surface
             verticalScrollBarPolicy   = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
         }
