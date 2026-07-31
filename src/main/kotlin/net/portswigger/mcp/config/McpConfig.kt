@@ -3,6 +3,8 @@ package net.portswigger.mcp.config
 import burp.api.montoya.logging.Logging
 import burp.api.montoya.persistence.PersistedObject
 import java.lang.ref.WeakReference
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
@@ -50,6 +52,66 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
 
     var filterConfigCredentials by storage.boolean(true)
     var allowExternalConnections by storage.boolean(false)
+
+    // ── Additional bind hosts ────────────────────────────────────────────────
+    private var _additionalBindHosts by storage.stringList("")
+    private val bindHostsChangeListeners = CopyOnWriteArrayList<ListenerRegistration>()
+
+    var additionalBindHosts: String
+        get() = _additionalBindHosts
+        set(value) {
+            if (_additionalBindHosts != value) {
+                _additionalBindHosts = value
+                notifyBindHostsChanged()
+            }
+        }
+
+    fun getAdditionalBindHostsList(): List<String> =
+        if (_additionalBindHosts.isBlank()) emptyList()
+        else _additionalBindHosts.split(TARGET_SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun getAllBindHosts(): List<String> = listOf(host) + getAdditionalBindHostsList()
+
+    fun addBindHost(ip: String): Boolean {
+        val trimmed = ip.trim()
+        if (trimmed.isBlank()) return false
+        val current = getAdditionalBindHostsList()
+        if (current.contains(trimmed) || trimmed == host) return false
+        additionalBindHosts = (current + trimmed).joinToString(TARGET_SEPARATOR)
+        return true
+    }
+
+    fun removeBindHost(ip: String): Boolean {
+        val current = getAdditionalBindHostsList()
+        val new = current.filter { it != ip.trim() }
+        if (new.size == current.size) return false
+        additionalBindHosts = new.joinToString(TARGET_SEPARATOR)
+        return true
+    }
+
+    fun clearAdditionalBindHosts() { additionalBindHosts = "" }
+
+    fun addBindHostsChangeListener(listener: () -> Unit): ListenerHandle {
+        val reg = ListenerRegistration(listener)
+        bindHostsChangeListeners.add(reg)
+        return ListenerHandle { bindHostsChangeListeners.remove(reg) }
+    }
+
+    private fun notifyBindHostsChanged() {
+        cleanupStaleListeners(bindHostsChangeListeners)
+        bindHostsChangeListeners.mapNotNull { it.listener.get() }.forEach {
+            try { it() } catch (e: Exception) { logging.logToError("Bind hosts listener failed: ${e.message}") }
+        }
+    }
+
+    // ── LAN IP detection ────────────────────────────────────────────────────
+    fun detectLanIps(): List<String> = try {
+        NetworkInterface.getNetworkInterfaces()?.toList()
+            ?.flatMap { iface -> iface.inetAddresses.toList() }
+            ?.filter { addr -> addr is Inet4Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress }
+            ?.map { it.hostAddress }
+            ?: emptyList()
+    } catch (_: Exception) { emptyList() }
 
     private var _autoApproveTargets by storage.stringList("")
     private val targetsChangeListeners = CopyOnWriteArrayList<ListenerRegistration>()
@@ -156,6 +218,7 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
     fun cleanup() {
         targetsChangeListeners.clear()
         dataAccessChangeListeners.clear()
+        bindHostsChangeListeners.clear()
     }
 }
 
