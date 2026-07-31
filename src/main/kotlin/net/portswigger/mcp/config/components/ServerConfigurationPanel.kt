@@ -94,6 +94,14 @@ class ServerConfigurationPanel(
             config.filterConfigCredentials
         ) { config.filterConfigCredentials = it }
         add(filterConfigCredentialsCheckBox)
+        add(createVerticalStrut(Design.Spacing.MD))
+
+        val allowExternalPanel = createToggleWithSubtitle(
+            "Allow external connections",
+            "⚠ WARNING: Disables localhost-only restriction — only enable on trusted networks",
+            config.allowExternalConnections
+        ) { config.allowExternalConnections = it }
+        add(allowExternalPanel)
 
         add(validationErrorLabel)
     }
@@ -199,6 +207,47 @@ class ServerConfigurationPanel(
             alignmentX = LEFT_ALIGNMENT
             isOpaque = false
             add(checkBox)
+            add(subtitlePanel)
+        }
+    }
+
+    private fun createToggleWithSubtitle(
+        mainText: String, subtitleText: String, initialValue: Boolean, onChange: (Boolean) -> Unit
+    ): JPanel {
+        val toggle = Design.createToggleSwitch(initialValue) { enabled ->
+            config.allowExternalConnections = enabled
+            onChange(enabled)
+        }
+        toggle.setState(initialValue, animate = false)
+
+        val rowPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 4)).apply {
+            isOpaque = false
+            alignmentX = LEFT_ALIGNMENT
+            add(JLabel(mainText).apply {
+                font = Design.Typography.bodyLarge
+                foreground = Design.Colors.onSurface
+            })
+            add(createHorizontalStrut(Design.Spacing.MD))
+            add(toggle)
+        }
+
+        val subtitleLabel = JLabel(subtitleText).apply {
+            font = Design.Typography.labelMedium
+            foreground = Design.Colors.error
+        }
+
+        val subtitlePanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = LEFT_ALIGNMENT
+            add(createHorizontalStrut(20))
+            add(subtitleLabel)
+        }
+
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = LEFT_ALIGNMENT
+            isOpaque = false
+            add(rowPanel)
             add(subtitlePanel)
         }
     }

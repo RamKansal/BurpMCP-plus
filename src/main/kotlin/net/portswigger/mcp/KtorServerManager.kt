@@ -63,8 +63,9 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
                         val host = call.request.header("Host")
                         val referer = call.request.header("Referer")
                         val userAgent = call.request.header("User-Agent")
+                        val allowExternal = config.allowExternalConnections
 
-                        if (origin != null && !isValidOrigin(origin)) {
+                        if (origin != null && !isValidOrigin(origin, allowExternal)) {
                             api.logging().logToOutput("Blocked DNS rebinding attack from origin: $origin")
                             call.respond(HttpStatusCode.Forbidden)
                             return@intercept
@@ -74,13 +75,13 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
                             return@intercept
                         }
 
-                        if (host != null && !isValidHost(host, config.port)) {
+                        if (host != null && !isValidHost(host, config.port, allowExternal)) {
                             api.logging().logToOutput("Blocked DNS rebinding attack from host: $host")
                             call.respond(HttpStatusCode.Forbidden)
                             return@intercept
                         }
 
-                        if (referer != null && !isValidReferer(referer)) {
+                        if (referer != null && !isValidReferer(referer, allowExternal)) {
                             api.logging().logToOutput("Blocked suspicious request from referer: $referer")
                             call.respond(HttpStatusCode.Forbidden)
                             return@intercept
@@ -135,7 +136,8 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
         executor.awaitTermination(10, TimeUnit.SECONDS)
     }
 
-    private fun isValidOrigin(origin: String): Boolean {
+    private fun isValidOrigin(origin: String, allowExternal: Boolean): Boolean {
+        if (allowExternal) return true
         try {
             val url = URI(origin).toURL()
             val hostname = url.host.lowercase()
@@ -159,15 +161,17 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
         return browserIndicators.any { userAgentLower.contains(it) }
     }
 
-    private fun isValidHost(host: String, expectedPort: Int): Boolean {
+    private fun isValidHost(host: String, expectedPort: Int, allowExternal: Boolean): Boolean {
         try {
             val parts = host.split(":")
             val hostname = parts[0].lowercase()
             val port = if (parts.size > 1) parts[1].toIntOrNull() else null
 
-            val allowedHosts = setOf("localhost", "127.0.0.1")
-            if (hostname !in allowedHosts) {
-                return false
+            if (!allowExternal) {
+                val allowedHosts = setOf("localhost", "127.0.0.1")
+                if (hostname !in allowedHosts) {
+                    return false
+                }
             }
 
             if (port != null && port != expectedPort) {
@@ -180,7 +184,8 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
         }
     }
 
-    private fun isValidReferer(referer: String): Boolean {
+    private fun isValidReferer(referer: String, allowExternal: Boolean): Boolean {
+        if (allowExternal) return true
         try {
             val url = URI(referer).toURL()
             val hostname = url.host.lowercase()
